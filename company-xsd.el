@@ -16,6 +16,7 @@
 ;; See README.md for more information
 
 ;;; Change Log:
+;; * Add support for symbols with ":" (such as tags with namespaces).
 
 ;;; Code:
 
@@ -306,21 +307,33 @@ COMPLETION-TYPE is the type of completion."
         (when (company-xsd--insert-required candidate)
           (company-xsd--make-template begin (point)))))))
 
+(defvar company-xsd--grab-symbol-syntax-table nil
+  "The syntax table used to grab a symbol.")
+
+(defun company-xsd--init-grab-symbol-syntax-table ()
+  "Initialize the grab symbol syntax table."
+  (when (and (not company-xsd--grab-symbol-syntax-table)
+             (eq major-mode 'nxml-mode))
+    (setq company-xsd--grab-symbol-syntax-table
+          (make-syntax-table nxml-mode-syntax-table))
+    (modify-syntax-entry ?: "_" company-xsd--grab-symbol-syntax-table)))
+
 (defun company-xsd--grab-symbol ()
   "Gets the current symbol that is begin completed."
-  (let ((guess (company-grab-symbol)))
-    (unless guess
-      (when (or
-             ;; Can complete attributes when at end of self-closing tag
-             (equal (string (char-after)) "/")
-             ;; Can complete attributes when inside a tag
-             (and (equal (string (char-after)) ">")
-                  (not (equal (string (char-before)) "/"))))
-        (insert " ")
-        (backward-char 1)
-        (setq guess (company-grab-symbol))
-        (delete-forward-char 1)))
-    guess))
+  (with-syntax-table company-xsd--grab-symbol-syntax-table
+    (let ((guess (company-grab-symbol)))
+      (unless guess
+        (when (or
+               ;; Can complete attributes when at end of self-closing tag
+               (equal (string (char-after)) "/")
+               ;; Can complete attributes when inside a tag
+               (and (equal (string (char-after)) ">")
+                    (not (equal (string (char-before)) "/"))))
+          (insert " ")
+          (backward-char 1)
+          (setq guess (company-grab-symbol))
+          (delete-forward-char 1)))
+      guess)))
 
 (defvar company-xsd--initialized nil
   "Non-nil if company-xsd has been initialized.")
@@ -328,6 +341,7 @@ COMPLETION-TYPE is the type of completion."
 (defun company-xsd-init-buffer ()
   "Initialize company xsd for the current buffer."
   (interactive)
+  (company-xsd--init-grab-symbol-syntax-table)
   (when (or (not company-xsd--initialized) (called-interactively-p))
     (hack-local-variables)
     (setq-local company-xsd--buffer-schemas
