@@ -236,20 +236,23 @@ Return (update-frame . annotations)."
 
 (defun xsd--interpret-object (entity xmlns-alist)
   "Interpret ENTITY with XMLNS-ALIST by updating its name."
-  (if (xsd-get entity :name)
-      (let* ((ns-name (xsd-get entity :name))
-             (ns (progn
-                   (if (string-match "{\\([^}]*\\)}\\(.*\\)" ns-name)
-                       (match-string 1 ns-name)
-                     (error (format "Interpreting object (%s) without namespace" ns-name)))))
-             (name (match-string 2 ns-name))
-             (qualifier (when (not (equal ns "[unqualified]"))
-                          (let ((ns-qualifier (assoc ns xmlns-alist)))
-                            (unless ns-qualifier
-                              (error (format "Unable to find qualifier for %s" ns)))
-                            (cdr ns-qualifier)))))
-        (xsd-set (copy-tree entity) :name (concat (if qualifier (concat qualifier ":") "") name)))
-    nil))
+  (if (xsd-element-p entity)
+      (if (xsd-get entity :name)
+          (let* ((ns-name (xsd-get entity :name))
+                 (ns (progn
+                       (if (string-match "{\\([^}]*\\)}\\(.*\\)" ns-name)
+                           (match-string 1 ns-name)
+                         (error (format "Interpreting object (%s) without namespace" ns-name)))))
+                 (name (match-string 2 ns-name))
+                 (qualifier (when (not (equal ns "[unqualified]"))
+                              (let ((ns-qualifier (assoc ns xmlns-alist)))
+                                (unless ns-qualifier
+                                  (error (format "Unable to find qualifier for %s" ns)))
+                                (cdr ns-qualifier)))))
+            (xsd-set (copy-tree entity) :name (concat (if qualifier (concat qualifier ":") "") name)))
+        nil)
+    entity))
+  
 
 (defun xsd--follow-object-path (path node entities xmlns-alist)
   "Follow PATH starting in NODE using availble ENTITIES and XMLNS-ALIST."
@@ -446,19 +449,16 @@ Both frames may be modified during the merge."
                  (t :optional)))
     (cond
      ((dom-attr node 'ref)
-      (setq qname (xsd--namespaceify-name (plist-get frame :xsd-xmlns-alist)
-                                          (dom-attr node 'ref)))
+      (setq qname (dom-attr node 'ref))
       (setq tag :ref-attribute))
      ((dom-attr node 'type)
       (setq tag :typed-attribute)
-      (setq qname (xsd--namespaceify-name (plist-get frame :xsd-xmlns-alist)
-                                          (xsd--qualify-name frame (dom-attr node 'name))))
+      (setq qname (dom-attr node 'name))
       (unless qname
         (error "Typed attribute without name")))
      (t
       (setq tag :inline-attribute)
-      (setq qname (xsd--namespaceify-name (plist-get frame :xsd-xmlns-alist)
-                                          (xsd--qualify-name frame (dom-attr node 'name))))
+      (setq qname (dom-attr node 'name))
       (unless qname
         (error "Inline attribute without name"))))
     (setq xsd-id (xsd--construct-id (plist-get frame :xsd-path) tag qname))
