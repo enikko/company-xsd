@@ -33,19 +33,45 @@
                                      (stringp (cdr schema))))
                schemas))
 
+(defun company-xsd--safe-namespace-qualifiers-p (namespace-qualifier)
+  "Non-nil if all NAMESPACE-QUALIFIER are safe (alist of namespace and qualifier)."
+  (seq-every-p (lambda (ns-qual) (and (consp ns-qual)
+                                      (stringp (car ns-qual))
+                                      (or (eq (cdr ns-qual) nil)
+                                          (stringp (cdr ns-qual)))))
+               namespace-qualifier))
+
 (defcustom company-xsd-schemas nil
-  "Override-path to the xsd schema describing the file.
+  "Override the xsd schema describing the file.
 
 Schemas are specified on the form (namespace . uri) and
-a global namespace is specified as nil.
+an unqualified namespace is specified as nil.  For example
+\((\"http://www.w3.org/2001/XMLSchema-instance\" .
+   \"http://www.w3.org/2001/XMLSchema-instance.xsd\"))
 
 If this is nil, then the company-xsd-guess-schemas function is
-called to deterimine the schema for the file."
+called to deterimine the schema for the files."
   :type '(repeat (cons (restricted-sexp :match-alternatives (string 'nil)) string))
-  :safe 'company-xsd--safe-schema-p)
+  :safe 'company-xsd--safe-schemas-p)
+
+(defcustom company-xsd-namespace-qualifier-alist nil
+  "Override the qualifiers used for different namespaces in the file.
+
+A namespace to qualifier mapping is described as (namespace . qualifier) where
+an unqualified namespace is specified with qualifier nil.  For example
+\((\"http://www.w3.org/2001/XMLSchema-instance\" . \"xsi\"))
+
+If this is nil, then company-xsd-guess-namespace-qualifier-is called to
+determine the namespace qualifiers for the file."
+  :type '(repeat (cons string (restricted-sexp :match-alternatives (string 'nil))))
+  :safe 'company-xsd--safe-namespace-qualifiers-p)
+
 
 (defvar company-xsd--buffer-schemas nil
   "The schemas that are used for this buffer.")
+
+(defvar company-xsd--buffer-namespace-qualifier-alist nil
+  "The namespace qualifiers used for this buffer.")
 
 (defcustom company-xsd-insert-deducible t
   "Insert all deducible information when completing."
@@ -63,43 +89,54 @@ called to deterimine the schema for the file."
     ;; This is an URI simply return it
     potential-uri))
 
-(defun company-xsd-guess-schemas ()
-  "Guess the uri of the schema for the current file.
+(defun company-xsd-guess-schemas (xml-dom)
+  "Guess the schemas (and namespaces) for the current file based on XML-DOM .
 
 Redefine this function for non-standard lookup for schemas.
 Only called if company-xsd-schemas is not set to nil."
-  (condition-case nil
-      (let ((attributes (dom-attributes (xml-parse-region (point-min) (point-max))))
-            namespaces location-prefix schema-location-id schema-location-no-namespace-id
-            schemas)
-        ;; Get all namespaces
-        (dolist (attr attributes)
-          (when (string-match-p "xmlns\\(:.*\\)?" (symbol-name (car attr)))
-            (setq namespaces (cons `(,(cdr attr) . ,(if (string-match-p ":" (symbol-name (car attr))) (car (cdr (split-string (symbol-name (car attr)) ":"))) nil)) namespaces))))
-        ;; If no schema instance simply assume it's included in global namespace
-        (setq location-prefix (assoc "http://www.w3.org/2001/XMLSchema-instance" namespaces))
-        (if location-prefix
-            (progn
-              (setq location-prefix (concat (cdr location-prefix) ":"))
-              (setq schema-location-id (concat location-prefix "schemaLocation"))
-              (setq schema-location-no-namespace-id (concat location-prefix "noNamespaceSchemaLocation")))
-          (setq schema-location-id "schemaLocation")
-          (setq schema-location-no-namespace-id "noNamespaceSchemaLocation"))
-        ;; go-through all the schema files and merge to a global completion schema
-        (dolist (attr attributes)
-          (when (equal (symbol-name (car attr)) schema-location-id)
-            (let ((entries (split-string (cdr attr)))
-                  namespace-id location)
-              (while entries
-                (setq namespace-id (pop entries))
-                (setq location (company-xsd--to-full-uri (pop entries)))
-                (add-to-list 'schemas `(,(cdr (assoc namespace-id namespaces)) .
-                                        ,location)))))
-          (when (equal (symbol-name (car attr)) schema-location-no-namespace-id)
-            (dolist (location (split-string (cdr attr)))
-              (add-to-list 'schemas `(nil . ,(company-xsd--to-full-uri location))))))
+  (let ((attributes (dom-attributes xml-dom))
+        location-prefix schema-location-id schema-location-no-namespace-id
         schemas)
-    (error nil)))
+    ;; Get all namespaces
+    (dolist (attr attributes)
+      (when (and (string-match-p "xmlns\\(:.*\\)?" (symbol-name (car attr)))
+                 (equal (cdr attr) "http://www.w3.org/2001/XMLSchema-instance"))
+        (setq location-prefix (if (string-match-p ":" (symbol-name (car attr))) (car (cdr (split-string (symbol-name (car attr)) ":"))) nil))))
+
+    (if location-prefix
+        (progn
+          (setq location-prefix (concat location-prefix ":"))
+          (setq schema-location-id (concat location-prefix "schemaLocation"))
+          (setq schema-location-no-namespace-id (concat location-prefix "noNamespaceSchemaLocation")))
+      (setq schema-location-id "schemaLocation")
+      (setq schema-location-no-namespace-id "noNamespaceSchemaLocation"))
+    ;; go-through all the schema files and merge to a global completion schema
+    (dolist (attr attributes)
+      (when (equal (symbol-name (car attr)) schema-location-id)
+        (let ((entries (split-string (cdr attr)))
+              namespace location)
+          (while entries
+            (setq namespace (pop entries))
+            (setq location (company-xsd--to-full-uri (pop entries)))
+            (add-to-list 'schemas `(,namespace . ,location)))))
+      (when (equal (symbol-name (car attr)) schema-location-no-namespace-id)
+        (dolist (location (split-string (cdr attr)))
+          (add-to-list 'schemas `(nil . ,(company-xsd--to-full-uri location))))))
+    schemas))
+
+(defun company-xsd-guess-namespace-qualifier (xml-dom)
+  "Guess the namespace qualifiers for the current file based on XML-DOM .
+
+Redefine this function for non-standard lookup for schemas.
+Only called if company-xsd-schemas is not set to nil."
+  (let ((attributes (dom-attributes xml-dom))
+        namespaces)
+    ;; Get all namespaces
+    (dolist (attr attributes)
+      (when (string-match-p "xmlns\\(:.*\\)?" (symbol-name (car attr)))
+        (add-to-list 'namespaces `(,(cdr attr) . ,(if (string-match-p ":" (symbol-name (car attr))) (car (cdr (split-string (symbol-name (car attr)) ":"))) nil)))))
+    namespaces))
+
 
 (defun company-xsd--setup-backend ()
   "Set up the backend."
@@ -107,7 +144,10 @@ Only called if company-xsd-schemas is not set to nil."
     (make-local-variable 'company-xsd--xsd-compilation-frame)
     (dolist (schema company-xsd--buffer-schemas)
       (setq company-xsd--xsd-compilation-frame
-            (xsd-merge-frames company-xsd--xsd-compilation-frame (xsd-compile-uri (cdr schema) (car schema)))))))
+            (xsd-merge-frames company-xsd--xsd-compilation-frame (xsd-compile-uri (cdr schema)))))
+    (setq company-xsd--xsd-compilation-frame
+          (xsd-interpret-compilation-frame company-xsd--xsd-compilation-frame
+                                           company-xsd--buffer-namespace-qualifier-alist))))
 
 (defun company-xsd--inside-tag-definition-p ()
   "Non-nil if the inside a tag definition."
@@ -160,7 +200,7 @@ company-xsd--attr when completing an attribute."
                (save-restriction
                  (widen)
                  (search-backward "<" nil 1)
-                 (string-match-p (replace-regexp-in-string "w" xmltok-ncname-regexp "\\`<w?\\'" t t)
+                 (string-match-p (replace-regexp-in-string "w" xmltok-ncname-regexp "\\`<\\(w:\\)?w?\\'" t t)
                                  (buffer-substring-no-properties (point) current-point))))))))
     (cond
      (in-name 'company-xsd--current-tag-name)
@@ -344,10 +384,19 @@ COMPLETION-TYPE is the type of completion."
   (company-xsd--init-grab-symbol-syntax-table)
   (when (or (not company-xsd--initialized) (called-interactively-p))
     (hack-local-variables)
-    (setq-local company-xsd--buffer-schemas
-                (if company-xsd-schemas
-                    company-xsd-schemas
-                  (company-xsd-guess-schemas)))
+    (let ((xml-dom (if (or (not company-xsd-schemas) (not company-xsd-namespace-qualifier-alist))
+                       (condition-case nil
+                           (xml-parse-region (point-min) (point-max))
+                         (error nil))
+                     nil)))
+      (setq-local company-xsd--buffer-schemas
+                  (if company-xsd-schemas
+                      company-xsd-schemas
+                    (company-xsd-guess-schemas xml-dom)))
+      (setq-local company-xsd--buffer-namespace-qualifier-alist
+                  (if company-xsd-namespace-qualifier-alist
+                      company-xsd-namespace-qualifier-alist
+                    (company-xsd-guess-namespace-qualifier xml-dom))))
     (company-xsd--setup-backend)
     (setq company-xsd--initialized t)))
 

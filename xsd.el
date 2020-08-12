@@ -39,8 +39,10 @@ Don't forget to clean the buffer when overriding, 'url-retrieve' clears buffers 
   "Create an empty compilation frame."
   (copy-tree `(:xsd-path ()
                :xsd-parent ()
-               :xsd-namespace nil
-               :xsd-entities ())))
+               :xsd-xmlns-alist ()
+               :xsd-target-namespace nil
+               :xsd-entities ()
+               :xsd-schema-qualifer nil)))
 
 (defalias 'xsd-get 'plist-get)
 (defalias 'xsd-set 'plist-put)
@@ -73,17 +75,18 @@ Don't forget to clean the buffer when overriding, 'url-retrieve' clears buffers 
   "Set PATH of FRAME."
   (plist-put frame :xsd-path (reverse path)))
 
-(defun xsd--construct-id (path tag qname)
-  "Construct a unique id from a PATH and TAG type and a QNAME."
+(defun xsd--construct-id (path tag ns-name)
+  "Construct a unique id from XMLNS-ALIST, a PATH, a TAG type and a NS-NAME."
   (let ((name ""))
     (dolist (path-entry path)
       (when (or (eq (car path-entry) :inline-element)
                 (eq (car path-entry) :typed-element)
-                (eq (car path-entry) :ref-element))
+                (eq (car path-entry) :ref-element)
+                (eq (car path-entry) :named-type))
         (setq name (concat name "/" (cdr path-entry)))))
     (concat name
             "/"
-            qname
+            ns-name
             "["
             (cond
              ((or (eq tag :inline-element) (eq tag :typed-element) (eq tag :ref-element))
@@ -94,13 +97,38 @@ Don't forget to clean the buffer when overriding, 'url-retrieve' clears buffers 
               "type"))
             "]")))
 
-(defun xsd--get-namespace (frame)
-  "Get the current namespace of FRAME."
-  (plist-get frame :xsd-namespace))
+(defun xsd--qualify-name (frame unqualified)
+  "Construct a qualified qname using target namespace of FRAME and UNQUALIFIED name.
 
-(defun xsd--set-namespace (frame namespace)
-  "Set NAMESPACE of FRAME."
-  (plist-put frame :xsd-namespace namespace))
+Has no effect if UNQUALIFIED is already qualified."
+  (let ((target-namespace (plist-get frame :xsd-target-namespace)))
+    (cond
+     ((not target-namespace) (concat "[unqualified]:" (if unqualified unqualified "")))
+     ((and unqualified (string-match-p ":" unqualified)) unqualified)
+     (t
+      (let ((ns-qualifier (assoc (plist-get frame :xsd-target-namespace)
+                                 (plist-get frame :xsd-xmlns-alist))))
+        (unless ns-qualifier
+          (error "Unable to find qualifier for target namespace"))
+        (concat (cdr ns-qualifier) ":" unqualified))))))
+
+(defun xsd--namespaceify-name (xmlns-alist qname)
+  "Construct \"{namespace}:name\" from XMLNS-ALIST and QNAME."
+  (let* ((qualifier-name (split-string qname ":"))
+         (qualifier (if (equal (length qualifier-name) 2)
+                        (car qualifier-name)
+                      nil))
+         (name (if (equal (length qualifier-name) 2)
+                   (car (cdr qualifier-name))
+                 (car qualifier-name)))
+         (ns-qualifier (rassoc qualifier xmlns-alist))
+         (ns (if (equal qualifier "[unqualified]")
+                 qualifier
+               (and ns-qualifier (car ns-qualifier)))))
+    (unless ns
+      (error (format "Constructing id for unknown qualifier %s" qualifier)))
+    (concat "{" ns "}" name)))
+
 
 (defun xsd--push-empty-annotation (frame)
   "Push a new annotation target in FRAME."
@@ -206,36 +234,51 @@ Return (update-frame . annotations)."
     (setq second (cdr second)))
   second)
 
-(defun xsd--follow-object-path (path node entities)
-  "Follow PATH starting in NODE using availble ENTITIES."
-  (cond
-   ((xsd-object-p node)
+(defun xsd--interpret-object (entity xmlns-alist)
+  "Interpret ENTITY with XMLNS-ALIST by updating its name."
+  (if (xsd-get entity :name)
+      (let* ((ns-name (xsd-get entity :name))
+             (ns (progn
+                   (if (string-match "{\\([^}]*\\)}\\(.*\\)" ns-name)
+                       (match-string 1 ns-name)
+                     (error (format "Interpreting object (%s) without namespace" ns-name)))))
+             (name (match-string 2 ns-name))
+             (qualifier (when (not (equal ns "[unqualified]"))
+                          (let ((ns-qualifier (assoc ns xmlns-alist)))
+                            (unless ns-qualifier
+                              (error (format "Unable to find qualifier for %s" ns)))
+                            (cdr ns-qualifier)))))
+        (xsd-set (copy-tree entity) :name (concat (if qualifier (concat qualifier ":") "") name)))
+    nil))
+
+(defun xsd--follow-object-path (path node entities xmlns-alist)
+  "Follow PATH starting in NODE using availble ENTITIES and XMLNS-ALIST."
+  (let ((interpreted-node (xsd--interpret-object node xmlns-alist)))
     (cond
-     ((not path) `(,node))
-     ((equal (car path) (xsd-get node :name))
+     ((xsd-object-p node)
       (cond
-       ((or (eq (xsd-get node :tag) :ref-element)
-            (eq (xsd-get node :tag) :ref-attribute))
-        (xsd--follow-object-path path (lax-plist-get entities (xsd-get node :ref)) entities))
-       ;; ((or (eq (xsd-get node :tag) :typed-element)
-       ;;      (eq (xsd-get node :tag) :typed-attribute))
-       ;;  (error "Unimplemented feature following typed"))
-       ((or (eq (xsd-get node :tag) :inline-element)
-            (eq (xsd-get node :tag) :inline-attribute)
-            (eq (xsd-get node :tag) :typed-element)
-            (eq (xsd-get node :tag) :typed-attribute))
-        (let ((path (cdr path))
-              result)
-          (dolist (child (xsd-get node :children))
-            (setq result (nconc result (xsd--follow-object-path path (lax-plist-get entities child) entities))))
-          result))
-       (t (error (format "Following unknown tag %s" (symbol-name (xsd-get node :tag)))))))
-     (t nil)))
-   ((or (xsd-root-p node) (xsd-type-p node))
-    (let (result)
-      (dolist (child (xsd-get node :children))
-        (setq result (nconc result (xsd--follow-object-path path (lax-plist-get entities child) entities))))
-      result))))
+       ((not path) `(,interpreted-node))
+       ((equal (car path) (xsd-get interpreted-node :name))
+        (cond
+         ((or (eq (xsd-get node :tag) :ref-element)
+              (eq (xsd-get node :tag) :ref-attribute))
+          (xsd--follow-object-path path (lax-plist-get entities (xsd-get node :ref)) entities xmlns-alist))
+         ((or (eq (xsd-get node :tag) :inline-element)
+              (eq (xsd-get node :tag) :inline-attribute)
+              (eq (xsd-get node :tag) :typed-element)
+              (eq (xsd-get node :tag) :typed-attribute))
+          (let ((path (cdr path))
+                result)
+            (dolist (child (xsd-get node :children))
+              (setq result (nconc result (xsd--follow-object-path path (lax-plist-get entities child) entities xmlns-alist))))
+            result))
+         (t (error (format "Following unknown tag %s" (symbol-name (xsd-get node :tag)))))))
+       (t nil)))
+     ((or (xsd-root-p node) (xsd-type-p node))
+      (let (result)
+        (dolist (child (xsd-get node :children))
+          (setq result (nconc result (xsd--follow-object-path path (lax-plist-get entities child) entities xmlns-alist))))
+        result)))))
 
 (defun xsd-get-object (frame path)
   "Get all objects in FRAME that is reachable as a PATH from root.
@@ -247,6 +290,7 @@ PATH is a list of strings that forms the path.
 If PATH is :all then all objects in FRAME is returned."
   (let ((result '())
         (entities (plist-get frame :xsd-entities))
+        (xmlns-alist (plist-get frame :xsd-xmlns-alist))
         xsd-id entity)
     (cond
      ((eq path :all)
@@ -255,9 +299,9 @@ If PATH is :all then all objects in FRAME is returned."
         (setq entity (pop entities))
         (when (or (xsd-attribute-p entity)
                   (xsd-element-p entity))
-          (add-to-list 'result entity))))
+          (add-to-list 'result (xsd--interpret-object entity xmlns-alist)))))
      (t
-      (setq result (xsd--follow-object-path path (lax-plist-get entities xsd--root-xsd-id) entities))))
+      (setq result (xsd--follow-object-path path (lax-plist-get entities xsd--root-xsd-id) entities xmlns-alist))))
     result))
 
 (defun xsd--add-child (frame child-id parent-id)
@@ -277,6 +321,10 @@ If PATH is :all then all objects in FRAME is returned."
   (let ((entities (plist-get frame :xsd-entities)))
     (plist-put frame :xsd-entities
                (lax-plist-put entities (xsd-get item :xsd-id) item))))
+
+(defun xsd--insert-entity-in-namespace (frame item)
+  "Insert ITEM into FRAME using current namespace."
+  (xsd--insert-raw-entity frame (plist-put item :namespace (plist-get frame :xsd-target-namespace))))
 
 (defun xsd-merge-frames (frame other)
   "Merge FRAME and OTHER by mergin entities from OTHER into FRAME.
@@ -303,37 +351,45 @@ Both frames may be modified during the merge."
 
 (defsubst xsd--match-tag-p (node tag)
   "Checks whether TAG matches the tag of the NODE."
-  (equal (dom-tag node) tag))
+  (equal (symbol-name (dom-tag node)) tag))
 
 (defun xsd--visit-schema (frame node)
   "Compile a schema NODE under FRAME."
-  (let ((old-namespace (xsd--get-namespace frame)))
+  (let ((old-xmlns-alist (plist-get frame :xsd-xmlns-alist)))
     (setq frame (xsd--set-path frame '((:root . nil))))
     (setq frame (xsd--push-parent frame xsd--root-xsd-id))
     (setq frame (xsd--insert-raw-entity frame `(:tag :root :xsd-id ,xsd--root-xsd-id)))
-    (let ((target-namespace (dom-attr node 'targetNamespace)))
-      (when target-namespace
-        (setq
-         frame
-         (xsd--set-namespace
-          frame
-          (let (namespace)
-            (dolist (attr (dom-attributes node))
-              (when (and (equal (cdr attr) target-namespace)
-                         (string-match-p "\\`xmlns\\(?::\\w+\\)?\\'" (symbol-name (car attr))))
-                (setq namespace (car (cdr (split-string (symbol-name (car attr)) ":"))))))
-            namespace)))))
+    (setq frame (plist-put frame :xsd-target-namespace (dom-attr node 'targetNamespace)))
+    (setq
+     frame
+     (plist-put frame :xsd-xmlns-alist
+                (let (xmlns-alist)
+                  (dolist (attr (dom-attributes node))
+                    (when (string-match-p "\\`xmlns\\(?::\\w+\\)?\\'" (symbol-name (car attr)))
+                      (add-to-list 'xmlns-alist `(,(cdr attr)
+                                                  .
+                                                  ,(car (cdr (split-string (symbol-name (car attr)) ":")))))))
+                  xmlns-alist)))
+    (when (and (not (plist-get frame :xsd-target-namespace))
+               (rassoc nil (plist-get frame :xsd-xmlns-alist)))
+      (error "XSD schema is both unqualified and has unqualified namespace"))
+    (when (not (plist-get frame :xsd-target-namespace))
+      (setq
+       frame
+       (plist-put frame :xsd-xmlns-alist
+                  (cons '("virtual:///" . nil) (plist-get frame :xsd-xmlns-alist)))))
     (setq frame (xsd--visit-children frame node))
     (setq frame (xsd--pop-path frame))
     (setq frame (xsd--pop-parent frame))
-    (xsd--set-namespace frame old-namespace)))
+    (plist-put frame :xsd-xmlns-alist old-xmlns-alist)))
 
 (defun xsd--visit-complex-type (frame node)
   "Compile a complex type NODE under FRAME."
-  (let* ((qname (dom-attr node 'name))
+  (let* ((qname (xsd--namespaceify-name (plist-get frame :xsd-xmlns-alist)
+                                        (xsd--qualify-name frame (dom-attr node 'name))))
          (tag (if qname :named-type :inline-type))
          (xsd-id (xsd--construct-id (plist-get frame :xsd-path) tag qname)))
-    (setq frame (xsd--insert-raw-entity frame `(:xsd-id ,xsd-id :tag ,tag :name ,qname)))
+    (setq frame (xsd--insert-entity-in-namespace frame `(:xsd-id ,xsd-id :tag ,tag :name ,qname)))
     (unless (eq (car (car (plist-get frame :xsd-path))) :root)
       (setq frame (xsd--add-child-top-parent frame xsd-id)))
     (setq frame (xsd--append-path frame `(,tag . ,qname)))
@@ -348,32 +404,28 @@ Both frames may be modified during the merge."
     (cond
      ((dom-attr node 'ref)
       (setq tag :ref-element)
-      (setq qname (dom-attr node 'ref))
-      (setq qname (if (string-match-p "\\w+:\\w+" qname)
-                      (if (equal (car (split-string qname ":")) (xsd--get-namespace frame))
-                          (car (cdr (split-string qname ":")))
-                        (error "Using different namespaces is not implemented"))
-                    qname))
+      (setq qname (xsd--namespaceify-name (plist-get frame :xsd-xmlns-alist)
+                                          (dom-attr node 'ref)))
       (setq ref (xsd--construct-id '((:root . nil)) :ref-element qname)))
      ((dom-attr node 'type)
-      (let ((type (dom-attr node 'type)))
-        (setq type (if (string-match-p "\\w+:\\w+" type)
-                        (if (equal (car (split-string type ":")) (xsd--get-namespace frame))
-                            (car (cdr (split-string type ":")))
-                          (error "Using different namespaces is not implemented"))
-                      type))
-        (setq tag :typed-element)
-        (setq qname (dom-attr node 'name))
-        (setq children `(,(xsd--construct-id '((:root . nil)) :named-type type)))
-        (unless qname
-          (error "Typed element without name"))))
+      (setq tag :typed-element)
+      (setq qname (xsd--namespaceify-name (plist-get frame :xsd-xmlns-alist)
+                                          (xsd--qualify-name frame (dom-attr node 'name))))
+      (setq children `(,(xsd--construct-id
+                         '((:root . nil))
+                         :named-type (xsd--namespaceify-name
+                                      (plist-get frame :xsd-xmlns-alist)
+                                      (dom-attr node 'type)))))
+      (unless qname
+        (error "Typed element without name")))
      (t
       (setq tag :inline-element)
-      (setq qname (dom-attr node 'name))
+      (setq qname (xsd--namespaceify-name (plist-get frame :xsd-xmlns-alist)
+                                          (xsd--qualify-name frame (dom-attr node 'name))))
       (unless qname
         (error "Inline element without name"))))
     (setq xsd-id (xsd--construct-id (plist-get frame :xsd-path) tag qname))
-    (setq frame (xsd--insert-raw-entity
+    (setq frame (xsd--insert-entity-in-namespace
                  frame
                  `(:tag ,tag :xsd-id ,xsd-id :name ,qname
                    :children ,children :ref ,ref)))
@@ -394,25 +446,23 @@ Both frames may be modified during the merge."
                  (t :optional)))
     (cond
      ((dom-attr node 'ref)
-      (let ((ref (dom-attr node 'ref)))
-        (setq tag :ref-attribute)
-        (setq qname (if (string-match-p "\\w+:\\w+" ref)
-                        (if (equal (car (split-string ref ":")) (xsd--get-namespace frame))
-                            (car (cdr (split-string ref ":")))
-                          (error "Using different namespaces is not implemented"))
-                      ref))))
+      (setq qname (xsd--namespaceify-name (plist-get frame :xsd-xmlns-alist)
+                                          (dom-attr node 'ref)))
+      (setq tag :ref-attribute))
      ((dom-attr node 'type)
       (setq tag :typed-attribute)
-      (setq qname (dom-attr node 'name))
+      (setq qname (xsd--namespaceify-name (plist-get frame :xsd-xmlns-alist)
+                                          (xsd--qualify-name frame (dom-attr node 'name))))
       (unless qname
         (error "Typed attribute without name")))
      (t
       (setq tag :inline-attribute)
-      (setq qname (dom-attr node 'name))
+      (setq qname (xsd--namespaceify-name (plist-get frame :xsd-xmlns-alist)
+                                          (xsd--qualify-name frame (dom-attr node 'name))))
       (unless qname
         (error "Inline attribute without name"))))
     (setq xsd-id (xsd--construct-id (plist-get frame :xsd-path) tag qname))
-    (setq frame (xsd--insert-raw-entity
+    (setq frame (xsd--insert-entity-in-namespace
                  frame
                  `(:tag ,tag :xsd-id ,xsd-id :name ,qname :usage ,usage)))
     (setq frame (xsd--add-child-top-parent frame xsd-id))
@@ -451,18 +501,27 @@ Both frames may be modified during the merge."
 
 (defun xsd--visit (frame node)
   "Visit NODE for compilation in the current FRAME."
-  (cond
-   ;; Unstructured nodes (i.e. text nodes) are safe to ignore since all data in xsd schema are structured data
-   ((stringp node) frame)
-   ((xsd--match-tag-p node 'annotation) (xsd--visit-annotation frame node))
-   ((xsd--match-tag-p node 'appinfo) (xsd--visit-appinfo frame node))
-   ((xsd--match-tag-p node 'attribute) (xsd--visit-attribute frame node))
-   ((xsd--match-tag-p node 'complexType) (xsd--visit-complex-type frame node))
-   ((xsd--match-tag-p node 'documentation) (xsd--visit-documentation frame node))
-   ((xsd--match-tag-p node 'element) (xsd--visit-element frame node))
-   ((xsd--match-tag-p node 'include) (xsd--visit-include frame node))
-   ((xsd--match-tag-p node 'schema) (xsd--visit-schema frame node))
-   (t (xsd--visit-children frame node))))
+  (let ((schema-qualifier (plist-get frame :xsd-schema-qualifier)))
+    (cond
+     ;; Unstructured nodes (i.e. text nodes) are safe to ignore since all data in xsd schema are structured data
+     ((stringp node) frame)
+     ((xsd--match-tag-p node (concat schema-qualifier "annotation"))
+      (xsd--visit-annotation frame node))
+     ((xsd--match-tag-p node (concat schema-qualifier "appinfo"))
+      (xsd--visit-appinfo frame node))
+     ((xsd--match-tag-p node (concat schema-qualifier "attribute"))
+      (xsd--visit-attribute frame node))
+     ((xsd--match-tag-p node (concat schema-qualifier "complexType"))
+      (xsd--visit-complex-type frame node))
+     ((xsd--match-tag-p node (concat schema-qualifier "documentation"))
+      (xsd--visit-documentation frame node))
+     ((xsd--match-tag-p node (concat schema-qualifier "element"))
+      (xsd--visit-element frame node))
+     ((xsd--match-tag-p node (concat schema-qualifier "include"))
+      (xsd--visit-include frame node))
+     ((xsd--match-tag-p node (concat schema-qualifier "schema"))
+      (xsd--visit-schema frame node))
+     (t (xsd--visit-children frame node)))))
 
 (defun xsd--set-frame-namespace (frame namespace)
   "Set all elements in FRAME to use NAMESPACE."
@@ -477,6 +536,23 @@ Both frames may be modified during the merge."
       (setq new-entities (lax-plist-put new-entities xsd-id entity)))
     (plist-put frame :xsd-entities new-entities)))
 
+(defun xsd--get-xml-schema-qualifier (xml)
+  "Get the qualifier for http://www.w3.org/2001/XMLSchema-instance in XML."
+  (let ((attributes (dom-attributes xml))
+        qualifier)
+    (while (and (not qualifier) attributes)
+      (let ((attr (car attributes)))
+        (when (equal (cdr attr) "http://www.w3.org/2001/XMLSchema")
+          (if (string-match-p ":" (symbol-name (car attr)))
+              (setq qualifier (concat (car (cdr (split-string (symbol-name (car attr)) ":"))) ":"))
+            (setq qualifier ""))))
+      (setq attributes (cdr attributes)))
+    qualifier))
+
+(defun xsd-interpret-compilation-frame (frame namespace-qualifier-alist)
+  "Interpret a FRAME using the NAMESPACE-QUALIFIER-ALIST."
+  (plist-put frame :xsd-xmlns-alist namespace-qualifier-alist))
+
 (defun xsd-print-compilation-frame (frame)
   "Prints FRAME to temporary buffer."
   (with-output-to-temp-buffer "*XSD-comp*"
@@ -487,44 +563,29 @@ Both frames may be modified during the merge."
     (terpri)
     (xsd--print-entities (plist-get frame :xsd-entities))))
 
-(defun xsd-compile-buffer (&optional buffer namespace)
-  "Compile the xsd schema in BUFFER.
-
-All entities in the compiled frame will use NAMESPACE if it is non-nil.
-Otherwise, they will be in the global namespace."
+(defun xsd-compile-buffer (&optional buffer)
+  "Compile the xsd schema in BUFFER."
   (interactive)
   (unless buffer
     (setq buffer (current-buffer)))
   (with-current-buffer
     buffer
-    (let* ((xml (xml-parse-region (point-min) (point-max)))
-           (frame (xsd--visit (xsd--empty-frame) xml)))
-      (if namespace
-          (xsd--set-frame-namespace frame namespace)
-        frame))))
+    (let ((xml (xml-parse-region (point-min) (point-max))))
+      (xsd--visit (plist-put (xsd--empty-frame) :xsd-schema-qualifier (xsd--get-xml-schema-qualifier xml)) xml))))
 
-(defun xsd-compile-uri (uri &optional namespace)
-  "Compile the xsd-file at URI.
-
-All entities in the compiled frame will use NAMESPACE if it is non-nil.
-Otherwise, they will be in the global namespace."
+(defun xsd-compile-uri (uri)
+  "Compile the xsd-file at URI."
   (with-current-buffer (xsd-uri-fetch uri)
-    (xsd-compile-buffer (current-buffer) namespace)))
+    (xsd-compile-buffer (current-buffer))))
 
-(defun xsd-compile-file (path &optional namespace)
+(defun xsd-compile-file (path)
   "Compile the xsd-file at PATH.
-
-All entities in the compiled frame will use NAMESPACE if it is non-nil.
-Otherwise, they will be in the global namespace.
 
 Most likely slightly faster than xsd-compile-uri.
 However, only recommended to use when it is known that it's a file without
 checking."
-  (let* ((xml (xml-parse-file path))
-         (frame (xsd--visit (xsd--empty-frame) xml)))
-    (if namespace
-        (xsd--set-frame-namespace frame namespace)
-      frame)))
+  (let ((xml (xml-parse-file path)))
+    (xsd--visit (plist-put (xsd--empty-frame) :xsd-schema-qualifier (xsd--get-xml-schema-qualifier xml)) xml)))
 
 (provide 'xsd)
 ;;; xsd.el ends here
