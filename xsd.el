@@ -41,8 +41,9 @@ Don't forget to clean the buffer when overriding, 'url-retrieve' clears buffers 
                :xsd-parent ()
                :xsd-xmlns-alist ()
                :xsd-target-namespace nil
+               :xsd-namespace-qualification ()
                :xsd-entities ()
-               :xsd-schema-qualifer nil)))
+               :xsd-schema-qualifier nil)))
 
 (defalias 'xsd-get 'plist-get)
 (defalias 'xsd-set 'plist-put)
@@ -129,10 +130,12 @@ Has no effect if UNQUALIFIED is already qualified."
       (error (format "Constructing id for unknown qualifier %s" qualifier)))
     (concat "{" ns "}" name)))
 
+(defun xsd--set-namespace-qualification (frame namespace qualification)
+  "Set the namespace qualification in for NAMESPACE to QUALIFICATION in FRAME."
+  (plist-put frame :xsd-namespace-qualification
+             (cons `(,namespace . ,qualification)
+                   (plist-get frame :xsd-namespace-qualification))))
 
-(defun xsd--push-empty-annotation (frame)
-  "Push a new annotation target in FRAME."
-  (plist-put frame :xsd-annotation (cons '() (plist-get frame :xsd-annotation))))
 
 (defun xsd--add-doc (frame item doc-tag)
   "Set the documentation ITEM with the tag DOC-TAG to FRAME."
@@ -234,29 +237,47 @@ Return (update-frame . annotations)."
     (setq second (cdr second)))
   second)
 
-(defun xsd--interpret-object (entity xmlns-alist)
-  "Interpret ENTITY with XMLNS-ALIST by updating its name."
-  (if (xsd-element-p entity)
-      (if (xsd-get entity :name)
-          (let* ((ns-name (xsd-get entity :name))
-                 (ns (progn
-                       (if (string-match "{\\([^}]*\\)}\\(.*\\)" ns-name)
-                           (match-string 1 ns-name)
-                         (error (format "Interpreting object (%s) without namespace" ns-name)))))
-                 (name (match-string 2 ns-name))
-                 (qualifier (when (not (equal ns "[unqualified]"))
-                              (let ((ns-qualifier (assoc ns xmlns-alist)))
-                                (unless ns-qualifier
-                                  (error (format "Unable to find qualifier for %s" ns)))
-                                (cdr ns-qualifier)))))
-            (xsd-set (copy-tree entity) :name (concat (if qualifier (concat qualifier ":") "") name)))
-        nil)
+(defun xsd--interpret-object (entity xmlns-alist ns-qualification-alist)
+  "Interpret ENTITY with XMLNS-ALIST by updating its name.
+
+A name is only qualified if required according to NS-QUALIFICATION-ALIST."
+  (if (xsd-get entity :name)
+      (let* ((ns-name (xsd-get entity :name))
+             (ns (progn
+                   (if (string-match "{\\([^}]*\\)}\\(.*\\)" ns-name)
+                       (match-string 1 ns-name)
+                     (error (format "Interpreting object (%s) without namespace" ns-name)))))
+             (name (match-string 2 ns-name))
+             (ns-qualification (when (not (eq ns-qualification-alist :inhibited))
+                                 (let ((q (assoc ns ns-qualification-alist)))
+                                   (if q (cdr q) q))))
+             (qualifier (cond
+                         ((equal ns "[unqualified]") nil)
+                         ((and (not (eq ns-qualification-alist :inhibited))
+                               (or (eq (xsd-get entity :tag) :inline-element)
+                                   (eq (xsd-get entity :tag) :typed-element))
+                               (not (plist-get ns-qualification :xsd-elem-qualified))) nil)
+                         ((and (not (eq ns-qualification-alist :inhibited))
+                               (or (eq (xsd-get entity :tag) :inline-attribute)
+                                   (eq (xsd-get entity :tag) :typed-attribute))
+                               (not (plist-get ns-qualification :xsd-elem-qualified))) nil)
+                         (t (let ((ns-qualifier (assoc ns xmlns-alist)))
+                              (unless ns-qualifier
+                                (error (format "Unable to find qualifier for %s" ns)))
+                              (cdr ns-qualifier))))))
+        (xsd-set (copy-tree entity) :name (concat (if qualifier (concat qualifier ":") "") name)))
     entity))
   
 
-(defun xsd--follow-object-path (path node entities xmlns-alist)
-  "Follow PATH starting in NODE using availble ENTITIES and XMLNS-ALIST."
-  (let ((interpreted-node (xsd--interpret-object node xmlns-alist)))
+(defun xsd--follow-object-path (path node entities xmlns-alist ns-qualification-alist
+                                     &optional not-root)
+  "Follow PATH starting in NODE using availble ENTITIES and XMLNS-ALIST.
+
+NS-QUALIFICATION-ALIST is describing what should be qualified in a namespace.
+NOT-ROOT is an internal variable."
+  (let ((interpreted-node (xsd--interpret-object
+                           node xmlns-alist
+                           (if not-root ns-qualification-alist :inhibited))))
     (cond
      ((xsd-object-p node)
       (cond
@@ -265,7 +286,7 @@ Return (update-frame . annotations)."
         (cond
          ((or (eq (xsd-get node :tag) :ref-element)
               (eq (xsd-get node :tag) :ref-attribute))
-          (xsd--follow-object-path path (lax-plist-get entities (xsd-get node :ref)) entities xmlns-alist))
+          (xsd--follow-object-path path (lax-plist-get entities (xsd-get node :ref)) entities xmlns-alist ns-qualification-alist t))
          ((or (eq (xsd-get node :tag) :inline-element)
               (eq (xsd-get node :tag) :inline-attribute)
               (eq (xsd-get node :tag) :typed-element)
@@ -273,14 +294,14 @@ Return (update-frame . annotations)."
           (let ((path (cdr path))
                 result)
             (dolist (child (xsd-get node :children))
-              (setq result (nconc result (xsd--follow-object-path path (lax-plist-get entities child) entities xmlns-alist))))
+              (setq result (nconc result (xsd--follow-object-path path (lax-plist-get entities child) entities xmlns-alist ns-qualification-alist t))))
             result))
          (t (error (format "Following unknown tag %s" (symbol-name (xsd-get node :tag)))))))
        (t nil)))
      ((or (xsd-root-p node) (xsd-type-p node))
       (let (result)
         (dolist (child (xsd-get node :children))
-          (setq result (nconc result (xsd--follow-object-path path (lax-plist-get entities child) entities xmlns-alist))))
+          (setq result (nconc result (xsd--follow-object-path path (lax-plist-get entities child) entities xmlns-alist ns-qualification-alist not-root))))
         result)))))
 
 (defun xsd-get-object (frame path)
@@ -294,6 +315,7 @@ If PATH is :all then all objects in FRAME is returned."
   (let ((result '())
         (entities (plist-get frame :xsd-entities))
         (xmlns-alist (plist-get frame :xsd-xmlns-alist))
+        (ns-qualification-alist (plist-get frame :xsd-namespace-qualification))
         xsd-id entity)
     (cond
      ((eq path :all)
@@ -302,9 +324,9 @@ If PATH is :all then all objects in FRAME is returned."
         (setq entity (pop entities))
         (when (or (xsd-attribute-p entity)
                   (xsd-element-p entity))
-          (add-to-list 'result (xsd--interpret-object entity xmlns-alist)))))
+          (add-to-list 'result (xsd--interpret-object entity xmlns-alist :inhibited)))))
      (t
-      (setq result (xsd--follow-object-path path (lax-plist-get entities xsd--root-xsd-id) entities xmlns-alist))))
+      (setq result (xsd--follow-object-path path (lax-plist-get entities xsd--root-xsd-id) entities xmlns-alist ns-qualification-alist))))
     result))
 
 (defun xsd--add-child (frame child-id parent-id)
@@ -381,6 +403,11 @@ Both frames may be modified during the merge."
        frame
        (plist-put frame :xsd-xmlns-alist
                   (cons '("virtual:///" . nil) (plist-get frame :xsd-xmlns-alist)))))
+    (let ((req-attr (equal (dom-attr node 'attributeFormDefault) "qualified"))
+          (req-elem (equal (dom-attr node 'elementFormDefault) "qualified")))
+      (setq frame (xsd--set-namespace-qualification
+                   frame (plist-get frame :xsd-target-namespace)
+                   `(:xsd-elem-qualified ,req-elem :xsd-attr-qualified ,req-attr))))
     (setq frame (xsd--visit-children frame node))
     (setq frame (xsd--pop-path frame))
     (setq frame (xsd--pop-parent frame))
@@ -449,16 +476,19 @@ Both frames may be modified during the merge."
                  (t :optional)))
     (cond
      ((dom-attr node 'ref)
-      (setq qname (dom-attr node 'ref))
+      (setq qname (xsd--namespaceify-name (plist-get frame :xsd-xmlns-alist)
+                                          (dom-attr node 'ref)))
       (setq tag :ref-attribute))
      ((dom-attr node 'type)
       (setq tag :typed-attribute)
-      (setq qname (dom-attr node 'name))
+      (setq qname (xsd--namespaceify-name (plist-get frame :xsd-xmlns-alist)
+                                          (xsd--qualify-name frame (dom-attr node 'name))))
       (unless qname
         (error "Typed attribute without name")))
      (t
       (setq tag :inline-attribute)
-      (setq qname (dom-attr node 'name))
+      (setq qname (xsd--namespaceify-name (plist-get frame :xsd-xmlns-alist)
+                                          (xsd--qualify-name frame (dom-attr node 'name))))
       (unless qname
         (error "Inline attribute without name"))))
     (setq xsd-id (xsd--construct-id (plist-get frame :xsd-path) tag qname))

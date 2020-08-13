@@ -223,7 +223,9 @@ COMPLETION-TYPE is the type of completion."
            (search-backward "<" nil 1)
            (let ((tag-start (1+ (point))))
              (save-excursion
-               (re-search-forward xmltok-ncname-regexp)
+               (re-search-forward (replace-regexp-in-string
+                                   "w" xmltok-ncname-regexp
+                                   "\\(w:\\)?w" t t))
                (setq path (cons (buffer-substring-no-properties tag-start (point)) path))))))
         (while (and (< (point-min) (point))
                     (condition-case nil
