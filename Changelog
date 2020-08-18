@@ -1,5 +1,8 @@
 -*- mode: fundamental; mode: auto-fill -*-
 
+Next Issue:
+  * Fix a few bugs when xsd schemas uses unqualified target namespaces.
+
 0.3:
   * Add support for qualification of attributes and elements in
     schemas (issue #4, attributeFormDefault and elementFormDefault).

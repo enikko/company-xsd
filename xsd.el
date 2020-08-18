@@ -111,7 +111,7 @@ Has no effect if UNQUALIFIED is already qualified."
                                  (plist-get frame :xsd-xmlns-alist))))
         (unless ns-qualifier
           (error "Unable to find qualifier for target namespace"))
-        (concat (cdr ns-qualifier) ":" unqualified))))))
+        (concat (when (cdr ns-qualifier) (concat (cdr ns-qualifier) ":")) unqualified))))))
 
 (defun xsd--namespaceify-name (xmlns-alist qname)
   "Construct \"{namespace}:name\" from XMLNS-ALIST and QNAME."
@@ -399,10 +399,11 @@ Both frames may be modified during the merge."
                (rassoc nil (plist-get frame :xsd-xmlns-alist)))
       (error "XSD schema is both unqualified and has unqualified namespace"))
     (when (not (plist-get frame :xsd-target-namespace))
+      (setq frame (plist-put frame :xsd-target-namespace "[unqualified]"))
       (setq
        frame
        (plist-put frame :xsd-xmlns-alist
-                  (cons '("virtual:///" . nil) (plist-get frame :xsd-xmlns-alist)))))
+                  (cons '("[unqualified]" . nil) (plist-get frame :xsd-xmlns-alist)))))
     (let ((req-attr (equal (dom-attr node 'attributeFormDefault) "qualified"))
           (req-elem (equal (dom-attr node 'elementFormDefault) "qualified")))
       (setq frame (xsd--set-namespace-qualification
