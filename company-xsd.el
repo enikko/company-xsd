@@ -2,6 +2,8 @@
 
 ;; Copyright (C) 2020 Erik Nikko
 
+;; Package-Version: 0.3
+
 ;; Author: Erik Nikko <65210465+enikko@users.noreply.github.com>
 ;; Created: 2020-08-06
 ;; Keywords: Autocompletion, company-mode backend, xml, xsd

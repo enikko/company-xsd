@@ -21,6 +21,7 @@
 (require 'cl)
 (require 'url)
 (require 'seq)
+(require 'dom)
 
 (defconst xsd--root-xsd-id "/[:root]"
   "The xsd-id for the root entity.")
