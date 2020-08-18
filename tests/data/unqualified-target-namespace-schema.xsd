@@ -1,0 +1,12 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="http://www.test-data.org/unqualified/target/namespace"
+           targetNamespace="http://www.test-data.org/unqualified/target/namespace"
+           elementFormDefault="unqualified">
+  <xs:element name="foo" type="foo-type"/>
+
+  <xs:complexType name="foo-type">
+    <xs:sequence>
+      <xs:element name="bar"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>
