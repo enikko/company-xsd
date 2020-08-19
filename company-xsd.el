@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2020 Erik Nikko
 
-;; Package-Version: 0.3
+;; Package-Version: 0.4.0
 
 ;; Author: Erik Nikko <65210465+enikko@users.noreply.github.com>
 ;; Created: 2020-08-06
@@ -402,7 +402,7 @@ COMPLETION-TYPE is the type of completion."
                       company-xsd-namespace-qualifier-alist
                     (company-xsd-guess-namespace-qualifier xml-dom))))
     (company-xsd--setup-backend)
-    (setq company-xsd--initialized t)))
+    (setq-local company-xsd--initialized t)))
 
 (defun company-xsd-backend (command &optional arg &rest ignored)
   "The company-xsd company-mode backend.
@@ -417,7 +417,6 @@ from the mode are IGNORED."
     ;; Setup the backend
     (init
      (when (eq major-mode 'nxml-mode)
-       (make-local-variable 'company-xsd--initialized)
        (company-xsd-init-buffer)))
     ;; When to run the backend and what is the prefix
     (prefix (and (eq major-mode 'nxml-mode)

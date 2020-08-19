@@ -1,0 +1,13 @@
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+        xmlns:imp="virtual://imported/namespace"
+        targetNamespace="virtual://imported/namespace"
+        elementFormDefault="qualified">
+  <element name="importedElement">
+    <complexType>
+      <sequence>
+        <element name="importedFoo"/>
+        <element name="importedBar"/>
+      </sequence>
+    </complexType>
+  </element>
+</schema>

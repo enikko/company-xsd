@@ -44,7 +44,8 @@ Don't forget to clean the buffer when overriding, 'url-retrieve' clears buffers 
                :xsd-target-namespace nil
                :xsd-namespace-qualification ()
                :xsd-entities ()
-               :xsd-schema-qualifier nil)))
+               :xsd-schema-qualifier nil
+               :xsd-schema-uri nil)))
 
 (defalias 'xsd-get 'plist-get)
 (defalias 'xsd-set 'plist-put)
@@ -68,6 +69,19 @@ Don't forget to clean the buffer when overriding, 'url-retrieve' clears buffers 
         (princ "  * ")
         (princ child)
         (princ "\n")))))
+
+(defun xsd--set-schema-uri (frame uri)
+  "Sets the URI of the schema in FRAME."
+  (plist-put frame :xsd-schema-uri uri))
+
+(defun xsd--as-absolute-uri (frame location)
+  "Gets LOCATION as an uri based on FRAME.
+
+If location is relative then location is relative to the
+schema location in frame."
+  (if (not (url-type (url-generic-parse-url location)))
+      (concat (file-name-directory (plist-get frame :xsd-schema-uri)) location)
+    location))
 
 (defun xsd--human-viewable-path (frame)
   "Get the path of FRAME."
@@ -136,7 +150,6 @@ Has no effect if UNQUALIFIED is already qualified."
   (plist-put frame :xsd-namespace-qualification
              (cons `(,namespace . ,qualification)
                    (plist-get frame :xsd-namespace-qualification))))
-
 
 (defun xsd--add-doc (frame item doc-tag)
   "Set the documentation ITEM with the tag DOC-TAG to FRAME."
@@ -371,7 +384,9 @@ Both frames may be modified during the merge."
                 (setq root (plist-put root :children (append (plist-get entity :children) children)))
                 (setq frame (xsd--insert-raw-entity frame root)))
             ;; simply add the new entities
-            (setq frame (xsd--insert-raw-entity frame entity))))
+            (setq frame (xsd--insert-raw-entity frame entity))
+            (dolist (ns-qualification (plist-get other :xsd-namespace-qualification))
+              (setq frame (xsd--set-namespace-qualification frame (car ns-qualification) (cdr ns-qualification))))))
         frame)
     other))
 
@@ -515,6 +530,13 @@ Both frames may be modified during the merge."
   "Visit a documentation NODE under FRAME."
   (xsd--doc-add-documentation frame (dom-text node)))
 
+(defun xsd--visit-import (frame node)
+  "Visit an import NODE under FRAME."
+  (let ((location (dom-attr node 'schemaLocation)))
+    (if location
+        (xsd-merge-frames frame (xsd-compile-uri (xsd--as-absolute-uri frame location)))
+      frame)))
+
 (defun xsd--visit-include (frame node)
   "Visit an include NODE under FRAME."
   (let ((uri (dom-attr node 'schemaLocation)))
@@ -549,6 +571,8 @@ Both frames may be modified during the merge."
       (xsd--visit-documentation frame node))
      ((xsd--match-tag-p node (concat schema-qualifier "element"))
       (xsd--visit-element frame node))
+     ((xsd--match-tag-p node (concat schema-qualifier "import"))
+      (xsd--visit-import frame node))
      ((xsd--match-tag-p node (concat schema-qualifier "include"))
       (xsd--visit-include frame node))
      ((xsd--match-tag-p node (concat schema-qualifier "schema"))
@@ -595,20 +619,25 @@ Both frames may be modified during the merge."
     (terpri)
     (xsd--print-entities (plist-get frame :xsd-entities))))
 
-(defun xsd-compile-buffer (&optional buffer)
-  "Compile the xsd schema in BUFFER."
+(defun xsd-compile-buffer (&optional buffer uri)
+  "Compile the xsd schema in BUFFER.
+
+URI is URI for the schema."
   (interactive)
   (unless buffer
     (setq buffer (current-buffer)))
-  (with-current-buffer
-    buffer
+  (with-current-buffer buffer
     (let ((xml (xml-parse-region (point-min) (point-max))))
-      (xsd--visit (plist-put (xsd--empty-frame) :xsd-schema-qualifier (xsd--get-xml-schema-qualifier xml)) xml))))
+      (xsd--visit (xsd--set-schema-uri
+                   (plist-put (xsd--empty-frame) :xsd-schema-qualifier
+                              (xsd--get-xml-schema-qualifier xml))
+                   uri)
+                  xml))))
 
 (defun xsd-compile-uri (uri)
   "Compile the xsd-file at URI."
   (with-current-buffer (xsd-uri-fetch uri)
-    (xsd-compile-buffer (current-buffer))))
+    (xsd-compile-buffer (current-buffer) uri)))
 
 (defun xsd-compile-file (path)
   "Compile the xsd-file at PATH.
@@ -617,7 +646,11 @@ Most likely slightly faster than xsd-compile-uri.
 However, only recommended to use when it is known that it's a file without
 checking."
   (let ((xml (xml-parse-file path)))
-    (xsd--visit (plist-put (xsd--empty-frame) :xsd-schema-qualifier (xsd--get-xml-schema-qualifier xml)) xml)))
+    (xsd--visit (xsd--set-schema-uri
+                 (plist-put (xsd--empty-frame) :xsd-schema-qualifier
+                            (xsd--get-xml-schema-qualifier xml))
+                 (concat "file://" (file-truename path)))
+                xml)))
 
 (provide 'xsd)
 ;;; xsd.el ends here

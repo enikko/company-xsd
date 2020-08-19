@@ -1,7 +1,9 @@
 -*- mode: fundamental; mode: auto-fill -*-
 
-Next Issue:
-  * Fix a few bugs when xsd schemas uses unqualified target namespaces.
+0.4.0
+  * Fix a few bugs when xsd schemas uses unqualified target
+    namespaces.
+  * Add support for import tags
 
 0.3:
   * Add support for qualification of attributes and elements in
