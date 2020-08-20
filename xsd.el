@@ -545,7 +545,7 @@ Both frames may be modified during the merge."
     ;; To only allowed children of include elements are annotations
     ;; and they are safe to ignore for the purpose of completion.
     ;; Hence, ignore them.
-    (xsd-merge-frames frame (xsd-compile-uri uri))))
+    (xsd-merge-frames frame (xsd-compile-uri (xsd--as-absolute-uri frame uri)))))
 
 (defun xsd--visit-children (frame node)
   "Visit all children of NODE under FRAME."

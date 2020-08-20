@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+
+<im:importedElement xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <im:importedFoo/>
+  <im:importedBar/>
+</im:importedElement>
+
+<!--
+    Local Variables:
+    flycheck-xml-xmllint-xsd-path: "tests/data/importing.xsd"
+    company-xsd-schemas: (("virtual://importing/namespace" . "tests/data/importing.xsd"))
+    company-xsd-namespace-qualifier-alist: (("virtual://importing/namespace" . "root") ("virtual://imported/namespace" . "im"))
+    End:
+-->

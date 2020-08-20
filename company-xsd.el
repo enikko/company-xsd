@@ -27,7 +27,7 @@
 (require 'company)
 (require 'company-template)
 
-(defun company-xsd--safe-schema-p (schemas)
+(defun company-xsd--safe-schemas-p (schemas)
   "Non-nil if all SCHEMAS are safe (alist of namespace and paths)."
   (seq-every-p (lambda (schema) (and (consp schema)
                                      (or (eq (car schema) nil)
@@ -66,7 +66,7 @@ an unqualified namespace is specified with qualifier nil.  For example
 If this is nil, then company-xsd-guess-namespace-qualifier-is called to
 determine the namespace qualifiers for the file."
   :type '(repeat (cons string (restricted-sexp :match-alternatives (string 'nil))))
-  :safe 'company-xsd--safe-namespace-qualifiers-p)
+  :safe #'company-xsd--safe-namespace-qualifiers-p)
 
 
 (defvar company-xsd--buffer-schemas nil
@@ -90,6 +90,13 @@ determine the namespace qualifiers for the file."
       (concat "file://" (file-truename default-directory) potential-uri)
     ;; This is an URI simply return it
     potential-uri))
+
+(defun company-xsd--using-schema-full-uri (schemas)
+  "Get SCHEMAS but with full uri instead of potential relative."
+  (let (res)
+    (dolist (schema schemas)
+      (add-to-list 'res `(,(car schema) . ,(company-xsd--to-full-uri (cdr schema)))))
+    res))
 
 (defun company-xsd-guess-schemas (xml-dom)
   "Guess the schemas (and namespaces) for the current file based on XML-DOM .
@@ -395,7 +402,7 @@ COMPLETION-TYPE is the type of completion."
                      nil)))
       (setq-local company-xsd--buffer-schemas
                   (if company-xsd-schemas
-                      company-xsd-schemas
+                      (company-xsd--using-schema-full-uri company-xsd-schemas)
                     (company-xsd-guess-schemas xml-dom)))
       (setq-local company-xsd--buffer-namespace-qualifier-alist
                   (if company-xsd-namespace-qualifier-alist

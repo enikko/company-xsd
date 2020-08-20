@@ -41,31 +41,50 @@
         (expect completions :to-have-same-items-as '("<fb:foo/>" "<fb:foo>")))))
 
 (describe "Test import schemas"
-  :var (buff completions)
+  :var (buffer completions)
   (before-all
-    (setq buff (get-buffer-create "test-buffer-2"))
-    (with-current-buffer buff
+    (setq buffer (get-buffer-create "test-buffer"))
+    (with-current-buffer buffer
       (insert-file-contents-literally "tests/data/import.xml")
       (nxml-mode)
       (company-xsd-init-buffer)))
   (after-all
-    (kill-buffer buff))
+    (kill-buffer buffer))
   (it "Test frame existance"
-    (with-current-buffer buff
+    (with-current-buffer buffer
       (expect company-xsd--xsd-compilation-frame :not :to-be nil)))
   (it "Test root completion from imported and root"
-    (with-completion-buffer buff
+    (with-completion-buffer buffer
         (goto-line 2)
         (setq completions (mapcar 'substring-no-properties (company-call-backend 'candidates "")))
         (expect (company-xsd--completion-type) :to-be 'company-xsd--new-tag-name)
         (expect completions :to-have-same-items-as
                 '("<im:importedElement>" "<im:importedElement/>" "<root:foo>" "<root:foo/>"))))
   (it "Test imported sub-element"
-      (with-completion-buffer buff
+      (with-completion-buffer buffer
         (goto-line 7)
         (setq completions (mapcar 'substring-no-properties (company-call-backend 'candidates "")))
         (expect (company-xsd--completion-type) :to-be 'company-xsd--new-tag-name)
         (expect completions :to-have-same-items-as
                 '("<im:importedFoo>" "<im:importedFoo/>" "<im:importedBar>" "<im:importedBar/>" "</im:importedElement>")))))
 
+(describe "Test set schema"
+  :var (buffer)
+  (it "Verify that schema paths are as expected"
+    (setq buffer (get-buffer-create "test-buffer"))
+    (with-current-buffer buffer
+      (insert-file-contents-literally "tests/data/elisp-set-namespace.xml")
+      (setq company-xsd-schemas '(("virtual://importing/namespace" . "tests/data/importing.xsd")))
+      (setq company-xsd-namespace-qualifier-alist '(("virtual://importing/namespace" . "root") ("virtual://imported/namespace" . "im")))
+      (nxml-mode)
+      (company-xsd-init-buffer)
+      (expect company-xsd--buffer-schemas :to-equal `(("virtual://importing/namespace" . ,(concat "file://" (file-truename (concat default-directory "tests/data/importing.xsd"))))))
+      (expect company-xsd-namespace-qualifier-alist :to-equal
+              company-xsd--buffer-namespace-qualifier-alist))
+    (kill-buffer buffer)))
+  
+
 ;;; company-xsd-tests.el ends here
+  ;; Local Variables:
+  ;; eval: (buttercup-minor-mode)
+  ;; End:
