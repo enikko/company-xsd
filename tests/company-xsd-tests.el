@@ -40,7 +40,7 @@
         (expect (company-xsd--completion-type) :to-be 'company-xsd--new-tag-name)
         (expect completions :to-have-same-items-as '("<fb:foo/>" "<fb:foo>")))))
 
-(describe "Test import schemas"
+(describe "Test import qualified schemas"
   :var (buffer completions)
   (before-all
     (setq buffer (get-buffer-create "test-buffer"))
@@ -67,6 +67,35 @@
         (expect (company-xsd--completion-type) :to-be 'company-xsd--new-tag-name)
         (expect completions :to-have-same-items-as
                 '("<im:importedFoo>" "<im:importedFoo/>" "<im:importedBar>" "<im:importedBar/>" "</im:importedElement>")))))
+
+(describe "Test import unqualified schemas"
+  :var (buffer completions)
+  (before-all
+    (setq buffer (get-buffer-create "test-buffer"))
+    (with-current-buffer buffer
+      (insert-file-contents-literally "tests/data/import_unqualified.xml")
+      (nxml-mode)
+      (company-xsd-init-buffer)))
+  (after-all
+    (kill-buffer buffer))
+  (it "Test frame existance"
+    (with-current-buffer buffer
+      (expect company-xsd--xsd-compilation-frame :not :to-be nil)))
+  (it "Test root completion from imported and root"
+    (with-completion-buffer buffer
+        (goto-line 2)
+        (setq completions (mapcar 'substring-no-properties (company-call-backend 'candidates "")))
+        (expect (company-xsd--completion-type) :to-be 'company-xsd--new-tag-name)
+        (expect completions :to-have-same-items-as
+                '("<root:bar>" "<root:bar/>" "<root:foo>" "<root:foo/>"))))
+  (it "Test imported sub-element"
+      (with-completion-buffer buffer
+        (goto-line 7)
+        (setq completions (mapcar 'substring-no-properties (company-call-backend 'candidates "")))
+        (expect (company-xsd--completion-type) :to-be 'company-xsd--new-tag-name)
+        (expect completions :to-have-same-items-as
+                '("<bar>" "<bar/>")))))
+
 
 (describe "Test set schema"
   :var (buffer)

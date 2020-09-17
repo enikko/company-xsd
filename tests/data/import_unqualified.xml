@@ -1,0 +1,7 @@
+<?xml version="1.0"?> <!-- -*- flycheck-xml-xmllint-xsd-path: "tests/data/importing_unqualified.xsd" -*- -->
+
+<root:bar xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns:root="virtual://importing/namespace"
+          xsi:schemaLocation="virtual://importing/namespace tests/data/importing_unqualified.xsd">
+  <foo/>
+</root:bar>

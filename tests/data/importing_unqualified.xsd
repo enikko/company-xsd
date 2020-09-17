@@ -1,0 +1,15 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:imp="virtual://imported/namespace"
+           xmlns="virtual://importing/namespace"
+           targetNamespace="virtual://importing/namespace"
+           elementFormDefault="unqualified">
+  <xs:import namespace="virtual://imported/namespace" schemaLocation="imported_unqualified.xsd"/>
+  <xs:element name="foo" type="foo-type"/>
+  <xs:element name="bar" type="imp:bar-type"/>
+
+  <xs:complexType name="foo-type">
+    <xs:sequence>
+      <xs:element name="bar"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>
