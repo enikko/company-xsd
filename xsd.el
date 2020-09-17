@@ -1,4 +1,4 @@
-;;; xsd.el --- Compiler of xsd schemas.
+;;; xsd.el --- Compiler of xsd schemas. -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2020 Erik Nikko
 

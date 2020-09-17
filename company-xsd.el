@@ -1,4 +1,4 @@
-;;; company-xsd.el --- Company-mode backend for xml files that relies on xsd schema.
+;;; company-xsd.el --- Company-mode backend for xml files that relies on xsd schema. -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2020 Erik Nikko
 
