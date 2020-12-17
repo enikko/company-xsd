@@ -18,7 +18,7 @@
 ;;; Code:
 
 (require 'xml)
-(require 'cl)
+(require 'cl-lib)
 (require 'url)
 (require 'seq)
 (require 'dom)

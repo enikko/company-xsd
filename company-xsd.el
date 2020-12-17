@@ -22,7 +22,7 @@
 
 ;;; Code:
 
-(require 'cl)
+(require 'cl-lib)
 (require 'xsd)
 (require 'company)
 (require 'company-template)
