@@ -96,10 +96,11 @@
         (expect completions :to-have-same-items-as  '("</root:bar>" "<foo/>" "<foo>"))))
   (it "Test inside imported element"
     (with-completion-buffer buffer
-       (goto-line 8)
-       (setq completions (mapcar 'substring-no-properties (company-call-backend 'candidates "")))
-       (expect (company-xsd--completion-type) :to-be 'company-xsd--new-tag-name)
-       (expect completions :to-have-same-items-as '("</foo>")))))
+      (goto-line 7)
+      (goto-char (line-end-position))
+      (setq completions (mapcar 'substring-no-properties (company-call-backend 'candidates "")))
+      (expect (company-xsd--completion-type) :to-be 'company-xsd--new-tag-name)
+      (expect completions :to-have-same-items-as '("</foo>")))))
 
 (describe "Test set schema"
   :var (buffer)

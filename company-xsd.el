@@ -384,6 +384,9 @@ COMPLETION-TYPE is the type of completion."
           (backward-char 1)
           (setq guess (company-grab-symbol))
           (delete-forward-char 1)))
+      (when (string= guess ">")
+        ;; Nothing to complete with a tag closer, go on with new tag/attribute
+        (setq guess ""))
       guess)))
 
 (defvar company-xsd--initialized nil
