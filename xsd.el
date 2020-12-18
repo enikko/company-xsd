@@ -276,9 +276,13 @@ A name is only qualified if required according to NS-QUALIFICATION-ALIST."
                                    (eq (xsd-get entity :tag) :typed-attribute))
                                (not (plist-get ns-qualification :xsd-elem-qualified))) nil)
                          (t (let ((ns-qualifier (assoc ns xmlns-alist)))
-                              (unless ns-qualifier
-                                (error (format "Unable to find qualifier for %s" ns)))
-                              (cdr ns-qualifier))))))
+                              ;; If no qualifier can be found, then this is a node
+                              ;; that is not allowed to be present (e.g. it could be
+                              ;; an unqualified element or a type from a namespace that is not
+                              ;; is not specified in the xml-file tried for the root element)
+                              (if ns-qualifier
+                                  (cdr ns-qualifier)
+                                ns))))))
         (xsd-set (copy-tree entity) :name (concat (if qualifier (concat qualifier ":") "") name)))
     entity))
   
@@ -295,7 +299,13 @@ NOT-ROOT is an internal variable."
     (cond
      ((xsd-object-p node)
       (cond
-       ((not path) `(,interpreted-node))
+       ((not path)
+        ;; If it's the root then the namespace must be present in xmlns-alist.
+        ;; Otherwise it might be from a namespace in some imported schema not used
+        ;; directly in the xml-file.
+        (if (or not-root (assoc (xsd-get interpreted-node :namespace) xmlns-alist))
+            `(,interpreted-node)
+          '()))
        ((equal (car path) (xsd-get interpreted-node :name))
         (cond
          ((or (eq (xsd-get node :tag) :ref-element)

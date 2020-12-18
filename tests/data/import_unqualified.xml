@@ -1,7 +1,17 @@
-<?xml version="1.0"?> <!-- -*- flycheck-xml-xmllint-xsd-path: "tests/data/importing_unqualified.xsd" -*- -->
+<?xml version="1.0"?>
 
 <root:bar xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
           xmlns:root="virtual://importing/namespace"
           xsi:schemaLocation="virtual://importing/namespace tests/data/importing_unqualified.xsd">
-  <foo/>
+
+  <foo>
+    
+  </foo>
 </root:bar>
+
+<!--
+    Local Variables:
+    flycheck-xml-xmllint-xsd-path: "importing_unqualified.xsd"
+    company-xsd-schemas: (("virtual://importing/namespace" . "importing_unqualified.xsd"))
+    End:
+-->

@@ -90,12 +90,16 @@
                 '("<root:bar>" "<root:bar/>" "<root:foo>" "<root:foo/>"))))
   (it "Test imported sub-element"
       (with-completion-buffer buffer
-        (goto-line 7)
+        (goto-line 6)
         (setq completions (mapcar 'substring-no-properties (company-call-backend 'candidates "")))
         (expect (company-xsd--completion-type) :to-be 'company-xsd--new-tag-name)
-        (expect completions :to-have-same-items-as
-                '("<bar>" "<bar/>")))))
-
+        (expect completions :to-have-same-items-as  '("</root:bar>" "<foo/>" "<foo>"))))
+  (it "Test inside imported element"
+    (with-completion-buffer buffer
+       (goto-line 8)
+       (setq completions (mapcar 'substring-no-properties (company-call-backend 'candidates "")))
+       (expect (company-xsd--completion-type) :to-be 'company-xsd--new-tag-name)
+       (expect completions :to-have-same-items-as '("</foo>")))))
 
 (describe "Test set schema"
   :var (buffer)
@@ -114,6 +118,7 @@
   
 
 ;;; company-xsd-tests.el ends here
-  ;; Local Variables:
-  ;; eval: (buttercup-minor-mode)
-  ;; End:
+;; Local Variables:
+;; eval: (buttercup-minor-mode)
+;; eval: (load-file "lib.el")
+;; End:

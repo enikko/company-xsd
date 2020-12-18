@@ -17,6 +17,7 @@
 
 (defmacro with-completion-buffer (buffer &rest body)
   "Use BUFFER where completions is possible and execute BODY."
+  (declare (indent defun))
   `(with-current-buffer ,buffer
      (save-window-excursion
        (set-window-buffer nil ,buffer)
