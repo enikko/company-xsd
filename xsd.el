@@ -147,9 +147,9 @@ Has no effect if UNQUALIFIED is already qualified."
 
 (defun xsd--set-namespace-qualification (frame namespace qualification)
   "Set the namespace qualification in for NAMESPACE to QUALIFICATION in FRAME."
-  (plist-put frame :xsd-namespace-qualification
-             (cons `(,namespace . ,qualification)
-                   (plist-get frame :xsd-namespace-qualification))))
+  (let ((current (plist-get frame :xsd-namespace-qualification)))
+    (cl-pushnew `(,namespace . ,qualification) current :test #'equal)
+    (plist-put frame :xsd-namespace-qualification current)))
 
 (defun xsd--add-doc (frame item doc-tag)
   "Set the documentation ITEM with the tag DOC-TAG to FRAME."
